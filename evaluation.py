@@ -168,6 +168,8 @@ def eval(qrels, query_file="queries.txt", k=1000, scoring_method="tfidf"):
             ranking = []
             if scoring_method == "bm25":
                 results = BSBI_instance.retrieve_bm25(query, k=k)
+            elif scoring_method == "wand":
+                results = BSBI_instance.retrieve_bm25_wand(query, k=k)
             else:
                 results = BSBI_instance.retrieve_tfidf(query, k=k)
             for (score, doc) in results:
@@ -184,10 +186,10 @@ def eval(qrels, query_file="queries.txt", k=1000, scoring_method="tfidf"):
     print("NDCG score =", sum(ndcg_scores) / len(ndcg_scores))
     print("AP   score =", sum(ap_scores) / len(ap_scores))
 
-
 if __name__ == '__main__':
     qrels = load_qrels()
     assert qrels["Q1"][166] == 1, "qrels salah"
     assert qrels["Q1"][300] == 0, "qrels salah"
     eval(qrels, scoring_method="tfidf")
     eval(qrels, scoring_method="bm25")
+    eval(qrels, scoring_method="wand")

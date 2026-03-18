@@ -131,7 +131,7 @@ class InvertedIndexReader(InvertedIndex):
         diproses di memori. JANGAN MEMUAT SEMUA INDEX DI MEMORI!
         """
         curr_term = next(self.term_iter)
-        pos, number_of_postings, len_in_bytes_of_postings, len_in_bytes_of_tf = self.postings_dict[curr_term]
+        pos, number_of_postings, len_in_bytes_of_postings, len_in_bytes_of_tf, _ = self.postings_dict[curr_term]
         postings_list = self.postings_encoding.decode(self.index_file.read(len_in_bytes_of_postings))
         tf_list = self.postings_encoding.decode_tf(self.index_file.read(len_in_bytes_of_tf))
         return (curr_term, postings_list, tf_list)
@@ -147,7 +147,7 @@ class InvertedIndexReader(InvertedIndex):
         byte tertentu pada file (index file) dimana postings list (dan juga
         list of TF) dari term disimpan.
         """
-        pos, number_of_postings, len_in_bytes_of_postings, len_in_bytes_of_tf = self.postings_dict[term]
+        pos, number_of_postings, len_in_bytes_of_postings, len_in_bytes_of_tf, _ = self.postings_dict[term]
         self.index_file.seek(pos)
         postings_list = self.postings_encoding.decode(self.index_file.read(len_in_bytes_of_postings))
         tf_list = self.postings_encoding.decode_tf(self.index_file.read(len_in_bytes_of_tf))
@@ -163,45 +163,25 @@ class InvertedIndexWriter(InvertedIndex):
         self.index_file = open(self.index_file_path, 'wb+')
         return self
 
-    def append(self, term, postings_list, tf_list):
+    def append(self, term, postings_list, tf_list, upper_bound=0.0):
         """
-        Menambahkan (append) sebuah term, postings_list, dan juga TF list 
+        Menambahkan (append) sebuah term, postings_list, tf_list, dan upper bound score
         yang terasosiasi ke posisi akhir index file.
-
-        Method ini melakukan 4 hal:
-        1. Encode postings_list menggunakan self.postings_encoding (method encode),
-        2. Encode tf_list menggunakan self.postings_encoding (method encode_tf),
-        3. Menyimpan metadata dalam bentuk self.terms, self.postings_dict, dan self.doc_length.
-           Ingat kembali bahwa self.postings_dict memetakan sebuah termID ke
-           sebuah 4-tuple: - start_position_in_index_file
-                           - number_of_postings_in_list
-                           - length_in_bytes_of_postings_list
-                           - length_in_bytes_of_tf_list
-        4. Menambahkan (append) bystream dari postings_list yang sudah di-encode dan
-           tf_list yang sudah di-encode ke posisi akhir index file di harddisk.
-
-        Jangan lupa update self.terms dan self.doc_length juga ya!
-
-        SEARCH ON YOUR FAVORITE SEARCH ENGINE:
-        - Anda mungkin mau membaca tentang Python I/O
-          https://docs.python.org/3/tutorial/inputoutput.html
-          Di link ini juga bisa kita pelajari bagaimana menambahkan informasi
-          ke bagian akhir file.
-        - Beberapa method dari object file yang mungkin berguna seperti seek(...)
-          dan tell()
 
         Parameters
         ----------
-        term:
-            term atau termID yang merupakan unique identifier dari sebuah term
-        postings_list: List[Int]
-            List of docIDs dimana term muncul
-        tf_list: List[Int]
-            List of term frequencies
+        term : int
+            Term atau termID yang merupakan unique identifier dari sebuah term.
+        postings_list : List[int]
+            List of docIDs dimana term muncul.
+        tf_list : List[int]
+            List of term frequencies.
+        upper_bound : float
+            Nilai upper bound score BM25 untuk term ini.
+            Digunakan untuk WAND Top-K Retrieval.
         """
-        self.terms.append(term) # update self.terms
+        self.terms.append(term)
 
-        # update self.doc_length
         for i in range(len(postings_list)):
             doc_id, freq = postings_list[i], tf_list[i]
             if doc_id not in self.doc_length:
@@ -214,8 +194,11 @@ class InvertedIndexWriter(InvertedIndex):
         compressed_tf_list = self.postings_encoding.encode_tf(tf_list)
         self.index_file.write(compressed_postings)
         self.index_file.write(compressed_tf_list)
-        self.postings_dict[term] = (curr_position_in_byte, len(postings_list), \
-                                    len(compressed_postings), len(compressed_tf_list))
+        self.postings_dict[term] = (curr_position_in_byte,
+                                    len(postings_list),
+                                    len(compressed_postings),
+                                    len(compressed_tf_list),
+                                    upper_bound)
 
 
 if __name__ == "__main__":

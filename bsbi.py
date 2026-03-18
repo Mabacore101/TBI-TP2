@@ -96,24 +96,15 @@ class BSBIIndex:
     def invert_write(self, td_pairs, index):
         """
         Melakukan inversion td_pairs (list of <termID, docID> pairs) dan
-        menyimpan mereka ke index. Disini diterapkan konsep BSBI dimana 
-        hanya di-mantain satu dictionary besar untuk keseluruhan block.
-        Namun dalam teknik penyimpanannya digunakan srategi dari SPIMI
-        yaitu penggunaan struktur data hashtable (dalam Python bisa
-        berupa Dictionary)
-
-        ASUMSI: td_pairs CUKUP di memori
-
-        Di Tugas Pemrograman 1, kita hanya menambahkan term dan
-        juga list of sorted Doc IDs. Sekarang di Tugas Pemrograman 2,
-        kita juga perlu tambahkan list of TF.
+        menyimpan mereka ke index. Diterapkan konsep BSBI dengan strategi SPIMI.
+        Upper bound score BM25 per term juga dihitung dan disimpan untuk WAND.
 
         Parameters
         ----------
-        td_pairs: List[Tuple[Int, Int]]
-            List of termID-docID pairs
-        index: InvertedIndexWriter
-            Inverted index pada disk (file) yang terkait dengan suatu "block"
+        td_pairs : List[Tuple[Int, Int]]
+            List of termID-docID pairs.
+        index : InvertedIndexWriter
+            Inverted index pada disk (file) yang terkait dengan suatu block.
         """
         term_dict = {}
         term_tf = {}
@@ -128,7 +119,9 @@ class BSBIIndex:
         for term_id in sorted(term_dict.keys()):
             sorted_doc_id = sorted(list(term_dict[term_id]))
             assoc_tf = [term_tf[term_id][doc_id] for doc_id in sorted_doc_id]
-            index.append(term_id, sorted_doc_id, assoc_tf)
+            # hitung upper bound: max TF component BM25 across all docs
+            upper_bound = max(assoc_tf)
+            index.append(term_id, sorted_doc_id, assoc_tf, upper_bound)
 
     def merge(self, indices, merged_index):
         """
@@ -163,6 +156,29 @@ class BSBIIndex:
                 merged_index.append(curr, postings, tf_list)
                 curr, postings, tf_list = t, postings_, tf_list_
         merged_index.append(curr, postings, tf_list)
+
+    def _advance_ptr(self, postings, ptr, target):
+        """
+        Memajukan pointer ptr pada postings list hingga mencapai
+        posisi dengan DID >= target.
+
+        Parameters
+        ----------
+        postings : List[int]
+            Postings list.
+        ptr : int
+            Posisi pointer saat ini.
+        target : int
+            Target DID minimum yang ingin dicapai.
+
+        Returns
+        -------
+        int
+            Posisi pointer baru.
+        """
+        while ptr < len(postings) and postings[ptr] < target:
+            ptr += 1
+        return ptr
 
     def retrieve_tfidf(self, query, k = 10):
         """
@@ -307,6 +323,123 @@ class BSBIIndex:
             docs = [(score, self.doc_id_map[doc_id]) for (doc_id, score) in scores.items()]
             return sorted(docs, key=lambda x: x[0], reverse=True)[:k]
 
+    def retrieve_bm25_wand(self, query, k=10, k1=1.2, b=0.75):
+        """
+        Melakukan Ranked Retrieval dengan algoritma WAND (Weak AND) Top-K
+        menggunakan scoring BM25. Dokumen yang tidak mungkin masuk top-K
+        di-skip tanpa menghitung score penuh, sehingga lebih efisien.
+
+        Parameters
+        ----------
+        query : str
+            Query tokens yang dipisahkan oleh spasi.
+        k : int
+            Banyaknya dokumen teratas yang dikembalikan.
+        k1 : float
+            Parameter saturasi TF. Nilai default 1.2.
+        b : float
+            Parameter normalisasi panjang dokumen. Nilai default 0.75.
+
+        Result
+        ------
+        List[(int, str)]
+            List of tuple: elemen pertama adalah score similarity, dan yang
+            kedua adalah nama dokumen.
+            Daftar Top-K dokumen terurut mengecil BERDASARKAN SKOR.
+
+        JANGAN LEMPAR ERROR/EXCEPTION untuk terms yang TIDAK ADA di collection.
+        """
+        if len(self.term_id_map) == 0 or len(self.doc_id_map) == 0:
+            self.load()
+
+        with InvertedIndexReader(self.index_name, self.postings_encoding, directory=self.output_dir) as merged_index:
+
+            avgdl = sum(merged_index.doc_length.values()) / len(merged_index.doc_length)
+            N = len(merged_index.doc_length)
+
+            # setup per-term data
+            query_terms = []
+            for word in query.split():
+                term_id = self.term_id_map[word]
+                if term_id in merged_index.postings_dict:
+                    postings, tf_list = merged_index.get_postings_list(term_id)
+                    ub = merged_index.postings_dict[term_id][4]
+                    df = merged_index.postings_dict[term_id][1]
+                    idf = math.log(N / df)
+                    query_terms.append({
+                        'term_id': term_id,
+                        'postings': postings,
+                        'tf_list': tf_list,
+                        'ub': ub * idf,
+                        'idf': idf,
+                        'ptr': 0  # pointer ke posisi saat ini di postings list
+                    })
+
+            if not query_terms:
+                return []
+
+            # threshold awal
+            threshold = 0.0
+            top_k = []  # min-heap of (score, doc_id)
+
+            cur_doc = -1
+
+            while True:
+                # sort terms by current DID (postings[ptr])
+                query_terms = [t for t in query_terms if t['ptr'] < len(t['postings'])]
+                if not query_terms:
+                    break
+                query_terms.sort(key=lambda t: t['postings'][t['ptr']])
+
+                # find pivot term
+                pivot_term_idx = None
+                accum_ub = 0.0
+                for i, t in enumerate(query_terms):
+                    accum_ub += t['ub']
+                    if accum_ub >= threshold:
+                        pivot_term_idx = i
+                        break
+
+                if pivot_term_idx is None:
+                    break
+
+                pivot = query_terms[pivot_term_idx]['postings'][query_terms[pivot_term_idx]['ptr']]
+
+                if pivot == cur_doc:
+                    break
+
+                if pivot <= cur_doc:
+                    # advance one of the preceding terms past cur_doc
+                    query_terms[0]['ptr'] = self._advance_ptr(
+                        query_terms[0]['postings'], query_terms[0]['ptr'], cur_doc + 1)
+                else:
+                    if query_terms[0]['postings'][query_terms[0]['ptr']] == pivot:
+                        # success - all terms before pivot point to pivot
+                        cur_doc = pivot
+                        # compute full BM25 score for cur_doc
+                        score = 0.0
+                        for t in query_terms:
+                            if t['postings'][t['ptr']] == cur_doc:
+                                tf = t['tf_list'][t['ptr']]
+                                dl = merged_index.doc_length[cur_doc]
+                                tf_norm = ((k1 + 1) * tf) / (k1 * ((1 - b) + b * (dl / avgdl)) + tf)
+                                score += t['idf'] * tf_norm
+                                t['ptr'] += 1
+                        # update top-k heap
+                        if len(top_k) < k:
+                            heapq.heappush(top_k, (score, cur_doc))
+                            if len(top_k) == k:
+                                threshold = top_k[0][0]
+                        elif score > top_k[0][0]:
+                            heapq.heapreplace(top_k, (score, cur_doc))
+                            threshold = top_k[0][0]
+                    else:
+                        # advance one preceding term to pivot
+                        query_terms[0]['ptr'] = self._advance_ptr(
+                            query_terms[0]['postings'], query_terms[0]['ptr'], pivot)
+
+            docs = [(score, self.doc_id_map[doc_id]) for (score, doc_id) in top_k]
+            return sorted(docs, key=lambda x: x[0], reverse=True)
 if __name__ == "__main__":
 
     BSBI_instance = BSBIIndex(data_dir = 'collection', \
