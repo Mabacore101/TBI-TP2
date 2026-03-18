@@ -11,6 +11,13 @@ along with evaluation metrics to measure search effectiveness.
 
 ## Features
 
+### Indexing Modes
+- **BSBI (Blocked Sort-Based Indexing)** — collects all term-doc pairs per block,
+  sorts them globally by termID, then writes to disk
+- **SPIMI (Single-Pass In-Memory Indexing)** — builds a hashtable dictionary directly
+  from the token stream, sorting only within each block before writing to disk.
+  More memory efficient than BSBI as it avoids global sorting of term-doc pairs
+
 ### Index Compression
 - **Standard Postings** — raw integer encoding using Python's array library
 - **Variable Byte Encoding (VBE)** — gap-based compression using variable-length bytes
@@ -36,9 +43,16 @@ pip install tqdm
 
 ## How to Run
 
-**1. Build the index**
+**1. Build the index (choose one)**
+
+Using BSBI:
 ```bash
 python bsbi.py
+```
+
+Using SPIMI:
+```bash
+python spimi.py
 ```
 
 **2. Test retrieval with sample queries**
