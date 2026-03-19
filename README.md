@@ -11,6 +11,13 @@ along with evaluation metrics to measure search effectiveness.
 
 ## Features
 
+### Dictionary Data Structure
+- **IdMap** — default hashtable-based dictionary for BSBI, maps terms to integer IDs
+  in O(1) average time
+- **TrieIdMap** — Trie (Prefix Tree) based dictionary used in SPIMI, shares common
+  prefixes between terms for more memory efficient storage. Used as a drop-in
+  replacement for IdMap with the same interface
+
 ### Indexing Modes
 - **BSBI (Blocked Sort-Based Indexing)** — collects all term-doc pairs per block,
   sorts them globally by termID, then writes to disk

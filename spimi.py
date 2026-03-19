@@ -6,7 +6,7 @@ from bsbi import BSBIIndex
 from index import InvertedIndexReader, InvertedIndexWriter
 from compression import VBEPostings
 from tqdm import tqdm
-
+from trie import TrieIdMap
 
 class SPIMIIndex(BSBIIndex):
     """
@@ -45,6 +45,8 @@ class SPIMIIndex(BSBIIndex):
         """
         super().__init__(data_dir, output_dir, postings_encoding, index_name)
         self.memory_threshold = memory_threshold
+        # replace IdMap with TrieIdMap for more memory efficient dictionary
+        self.term_id_map = TrieIdMap()
 
     def spimi_invert(self, token_stream, index_id):
         """
