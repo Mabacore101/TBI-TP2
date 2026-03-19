@@ -1,8 +1,12 @@
 # TBI_TP2 - Search Engine from Scratch
-Collaborators: Alfan Farizki Wicaksono, Claude AI
 
 A search engine built from scratch using Python standard libraries,
 developed as part of the Information Retrieval (TBI) course assignment.
+
+## Acknowledgements
+- Starter code and assignment provided by Alfan Farizki Wicaksono
+- AI assistance (Claude by Anthropic) used for implementation guidance and code generation during development
+
 
 ## Project Overview
 This project implements a search engine using the BSBI (Blocked Sort-Based Indexing)
